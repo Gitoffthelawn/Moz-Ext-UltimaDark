@@ -177,6 +177,9 @@ class WebsitesOverrideScript {
              ["style","integrity"].includes (attribute.toLowerCase())   )
 
         uDark.valuePrototypeEditor(HTMLImageElement, "src", (image, value) => {
+            if (!(value instanceof String || typeof value === "string")) {
+                return value;
+            }
             // return value;
             let res = uDark.image_element_prepare_href(image, value);
             if (value.startsWith("data:")) {

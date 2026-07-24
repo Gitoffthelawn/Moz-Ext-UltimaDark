@@ -3,8 +3,8 @@
 class uDarkC extends uDarkExtended {
 
   overrideEncodeCharsetForCSS = "utf-8"; /*// We can safely re-encode CSS as UTF-8 with a BOM,
-// ignoring original charset / @charset or charset attribute.
-// This fixes all CSS `content` encoding issues elegantly */
+  // ignoring original charset / @charset or charset attribute.
+  // This fixes all CSS `content` encoding issues elegantly */
   exportFunction = f => f; // Emulate the exportFunction function of the content script to avoid many ternary operators
   logPrefix = "UltimaDark:";
   log(...args) {
@@ -115,7 +115,187 @@ class uDarkC extends uDarkExtended {
 
   direct_window_export = true
   general_cache = new Map()
+  CSSCommentAnchors = class {
+    constructor(css) {
+      this.originalCss = css;
+      this.cleanCss = "";
+      this.comments = [];
+      this.items = [];
+      this.scan();
+    }
 
+    mergeWithCssRules(cssRules) {
+      const merged = [];
+      let ruleIndex = 0;
+
+      for (const item of this.items) {
+        if (item.type === "comment") {
+          merged.push({
+            type: "comment",
+            cssText: item.cssText,
+          });
+        } else if (item.type === "rule") {
+          const rule = cssRules[ruleIndex++];
+
+          if (rule) {
+            merged.push(rule);
+          }
+        }
+      }
+
+      // Si CSSOM a ajouté/gardé des rules non vues par le scanner.
+      while (ruleIndex < cssRules.length) {
+        merged.push(cssRules[ruleIndex++]);
+      }
+
+      return merged;
+    }
+
+    scan() {
+      const css = this.originalCss;
+      const out = [];
+
+      let i = 0;
+      let depth = 0;
+      let lastSignificant = "SOF";
+      // SOF | RULE_END | COMMENT_TOP | OTHER
+
+      const isWhitespace = ch =>
+        ch === " " || ch === "\n" || ch === "\r" || ch === "\t" || ch === "\f";
+
+      const isNewline = ch =>
+        ch === "\n" || ch === "\r" || ch === "\f";
+
+      const whitespaceLike = text =>
+        text.replace(/[^\n\r]/g, " ");
+
+      const consumeString = quote => {
+        const start = i;
+        i++;
+
+        while (i < css.length) {
+          const ch = css[i];
+
+          if (ch === "\\") {
+            i += 2;
+            continue;
+          }
+
+          i++;
+
+          if (ch === quote) break;
+          if (isNewline(ch)) break;
+        }
+
+        out.push(css.slice(start, i));
+
+        if (depth === 0) {
+          lastSignificant = "OTHER";
+        }
+      };
+
+      const pushPendingRuleIfNeeded = () => {
+        // Quand une vraie rule démarre après un ou plusieurs commentaires,
+        // on note juste “ici il y aura une vraie cssRule”.
+        this.items.push({
+          type: "rule",
+        });
+      };
+
+      const consumeComment = () => {
+        const start = i;
+        const end = css.indexOf("*/", i + 2);
+
+        if (end === -1) {
+          out.push(css.slice(i));
+          i = css.length;
+          return;
+        }
+
+        const text = css.slice(start, end + 2);
+
+        const topLevelComment =
+          depth === 0 &&
+          (
+            lastSignificant === "SOF" ||
+            lastSignificant === "RULE_END" ||
+            lastSignificant === "COMMENT_TOP"
+          );
+
+        if (topLevelComment) {
+          this.items.push({
+            type: "comment",
+            cssText: text,
+          });
+
+          lastSignificant = "COMMENT_TOP";
+        } else {
+          lastSignificant = "OTHER";
+        }
+
+        out.push(whitespaceLike(text));
+        i = end + 2;
+      };
+
+      while (i < css.length) {
+        const ch = css[i];
+        const next = css[i + 1];
+
+        if (ch === '"' || ch === "'") {
+          consumeString(ch);
+          continue;
+        }
+
+        if (ch === "/" && next === "*") {
+          consumeComment();
+          continue;
+        }
+
+        if (ch === "{") {
+          if (depth === 0) {
+            pushPendingRuleIfNeeded();
+          }
+
+          depth++;
+          out.push(ch);
+          lastSignificant = "OTHER";
+          i++;
+          continue;
+        }
+
+        if (ch === "}") {
+          out.push(ch);
+
+          if (depth > 0) depth--;
+
+          if (depth === 0) {
+            lastSignificant = "RULE_END";
+          }
+
+          i++;
+          continue;
+        }
+
+        if (ch === ";" && depth === 0) {
+          pushPendingRuleIfNeeded();
+
+          out.push(ch);
+          lastSignificant = "RULE_END";
+          i++;
+          continue;
+        }
+
+        if (depth === 0 && !isWhitespace(ch)) {
+          lastSignificant = "OTHER";
+        }
+
+        out.push(ch);
+        i++;
+      }
+
+      this.cleanCss = out.join("");
+    }
+  }
   userSettings = { // Default user settings
     isEnabled: true,
     inclusionPatterns: ["<all_urls>", "*://*/*", "https://*.w3schools.com/*"].join('\n'),
@@ -128,6 +308,7 @@ class uDarkC extends uDarkExtended {
     bg_negative_modifier: 0, // handy transformer for OLED displays : modifier for background colors
     fg_negative_modifier: 0, // Handy transformer for OLED displays : modifier for foreground colors
     precisionNumber: 2,
+    preserve_comments: true,
     cacheEnabled: false, // Enable or disable caching
     inject_css_suggestedimageEditionEnabled: true, // Enable or disable image edition
     serviceWorkersEnabled: false, // Enable or disable service workers
@@ -192,7 +373,7 @@ class uDarkC extends uDarkExtended {
       }
     });
   }
-  byPassCSPNonce="8IBTHwOdqNKAWeKl7plt8g=="
+  byPassCSPNonce = "8IBTHwOdqNKAWeKl7plt8g=="
   imageSrcInfoMarker = "_uDark"
   imageWorkerJsFile = {
     pooledAI: "imageWorker/imageWorkerBundle-pooledAI.js",
@@ -535,12 +716,12 @@ class uDarkC extends uDarkExtended {
       return aFunction.name;
     }
     /*
-      UltimaDark patches browser prototypes early, but other extensions may run
-      first and modify the same APIs. Some (e.g., SingleFile) override the
-      "name" property on native methods so that .name becomes "", while the
-      function itself is still native. This can break UltimaDark logic that
-      relies on correct function names. This helper restores the proper names
-      without replacing the functions or touching the prototype chain.
+    UltimaDark patches browser prototypes early, but other extensions may run
+    first and modify the same APIs. Some (e.g., SingleFile) override the
+    "name" property on native methods so that .name becomes "", while the
+    function itself is still native. This can break UltimaDark logic that
+    relies on correct function names. This helper restores the proper names
+    without replacing the functions or touching the prototype chain.
     */
     const keys = Object.getOwnPropertyNames(proto);
     for (const key of keys) {
@@ -580,21 +761,21 @@ class uDarkC extends uDarkExtended {
     }
     let originalFunctionKey = "o_ud_" + laFonction.name
     var originalFunction = uDark.exportFunction(Object.getOwnPropertyDescriptor(leType.prototype, laFonction.name).value, window);
-    
+
     // store original function
     Object.defineProperty(leType.prototype, originalFunctionKey, {
       value: originalFunction,
       writable: true
     });
-    
+
     // create a named wrapper
     const wrappedFunction = uDark.exportFunction(function wrapper() {
-      
+
       if (conditon === true || conditon.apply(this, arguments)) {
         const watcher_result = watcher(this, arguments);
 
-        if(watcher_result[0] instanceof Error && watcher_result[0].message === "CancelledCall") {
-       
+        if (watcher_result[0] instanceof Error && watcher_result[0].message === "CancelledCall") {
+
           return originalFunction.apply(this, arguments[0].altArgs); // Return the original value without modification if the call was cancelled
         }
         const result = originalFunction.apply(this, watcher_result);
@@ -602,13 +783,13 @@ class uDarkC extends uDarkExtended {
       }
       return originalFunction.apply(this, arguments);
     }, window);
-    
+
     // now **set the visible name**
     Object.defineProperty(wrappedFunction, "name", {
       value: laFonction.name,
       configurable: true
     });
-    
+
     // install it
     Object.defineProperty(leType.prototype, laFonction.name, {
       value: {
@@ -798,13 +979,12 @@ class uDarkC extends uDarkExtended {
   }
   edit_styles_elements(parentElement, details, add_class = "ud-edited-background", options = {}) {
     parentElement.querySelectorAll(`style:not(.${add_class})`).forEach(astyle => {
-      if(!details || details.hasHashCSP)
-      {
-        if(!astyle.nonce){
+      if (!details || details.hasHashCSP) {
+        if (!astyle.nonce) {
           astyle.setAttribute("nonce", uDark.byPassCSPNonce);
         }
       }
-      
+
       astyle.p_ud_innerHTML = uDark.edit_str(astyle.innerHTML.unprotect_simple("ud-tag-ptd-" /*display:table is a thing*/), false, false, details, false, options);
       // astyle.innerHTML='*{fill:red!important;}'
       // According to https://stackoverflow.com/questions/55895361/how-do-i-change-the-innerhtml-of-a-global-style-element-with-cssrule ,
@@ -820,7 +1000,7 @@ class uDarkC extends uDarkExtended {
 
 
     /*
-       /*
+    /*
     ===============================================================================
     HTML document prolog parsing – exact-fidelity rationale
     ===============================================================================
@@ -891,40 +1071,40 @@ class uDarkC extends uDarkExtended {
 
     /*
     
- 
- This regexp ^(  … )* greedily matches everything that is permitted to appear at the
- start of an HTML document *before normal element parsing begins*, stopping
- as soon as the tokenizer would re-enter the DATA state for real markup
- (typically at <html>).
- 
- Each alternative corresponds to a construct that is legal or tolerated by the
- HTML tokenizer in the document prolog:
+    
+    This regexp ^(  … )* greedily matches everything that is permitted to appear at the
+    start of an HTML document *before normal element parsing begins*, stopping
+    as soon as the tokenizer would re-enter the DATA state for real markup
+    (typically at <html>).
+    
+    Each alternative corresponds to a construct that is legal or tolerated by the
+    HTML tokenizer in the document prolog:
     1) \s and \0x00
     Matches literal ASCII whitespace and BOM at start (Specific to javascript).
- 
- 2) &#0*?(9|10|12|13|32)(?![0-9])
+    
+    2) &#0*?(9|10|12|13|32)(?![0-9])
     Matches decimal numeric character references for TAB, LF, FF, CR and SPACE.
     The negative lookahead prevents over-consuming longer numeric entities.
- 
- 3) &#x0*?(9|A|C|D|20)(?![0-9A-F])
+    
+    3) &#x0*?(9|A|C|D|20)(?![0-9A-F])
     Same as above, but for hexadecimal numeric character references.
- 3.5) 0*? accepts leading-zero numeric references (&#09;, &#x000A) while staying minimally greedy.
- 4) <!--.*?(--!?>|$)
+    3.5) 0*? accepts leading-zero numeric references (&#09;, &#x000A) while staying minimally greedy.
+    4) <!--.*?(--!?>|$)
     Matches valid HTML comments, including the non-standard but tolerated
     “comment end bang” form (--!>). Also tolerates unterminated comments to
     preserve malformed input verbatim.
     // Real HTML comments must consume until '-->' or '--!>'; placing this branch
-     // first avoids treating them as generic '<!' constructs that stop at '>'.
- 
- 5) <[\/!\?].*?(>|$)
+    // first avoids treating them as generic '<!' constructs that stop at '>'.
+    
+    5) <[\/!\?].*?(>|$)
     Matches any '<' followed by '/', '!' or '?', covering:
-      - removed or invalid closing tags (</...>)
-      - DOCTYPE declarations (<!DOCTYPE ...>)
-      - comments not caught above
-      - processing instructions (<?...?>)
+    - removed or invalid closing tags (</...>)
+    - DOCTYPE declarations (<!DOCTYPE ...>)
+    - comments not caught above
+    - processing instructions (<?...?>)
     These forms may legitimately lead the tokenizer into the bogus comment
     state and must be preserved.
- */
+    */
     let usedRegex =
       /^(\x00|\s|&#0*?(?:9|10|12|13|32)(?![0-9])|&#x0*?(?:9|A|C|D|20)(?![0-9A-F])|<!--.*?(--!?>|$)|<[\/!\?].*?(>|$))*/si
     const fullmatch = html.match(usedRegex);
@@ -966,7 +1146,7 @@ class uDarkC extends uDarkExtended {
     aDocument.querySelectorAll("meta[http-equiv=content-security-policy]").forEach(meta => {
       let item = { value: meta.getAttribute("content") };
       if (item.value && item.value.trim().length) {
-        uDark.headersDo["content-security-policy"](item,details);
+        uDark.headersDo["content-security-policy"](item, details);
         meta.setAttribute("content", item.value);
       }
 
@@ -1014,19 +1194,19 @@ class uDarkC extends uDarkExtended {
   }
   reparseDocumentWithNoScript(parsedDocument, strO, details) {
     /**
-     * Re-parses a document so that <noscript> is treated as an opaque element.
-     *
-     * DOMParser runs with "scripting = off", which means <noscript> contents are
-     * parsed as normal DOM instead of being treated as raw/opaque text. This function
-     * reconstructs the document structure so that:
-     *
-     *  • Elements that are valid inside <head> stay in <head>
-     *  • Elements that belong in <body> are moved there
-     *  • <noscript> is preserved in the same structural position the browser
-     *    would have used when scripting is ON
-     *
-     * The parser tokenization behavior is still relied upon — we simply correct
-     * structural placement afterwards.
+    * Re-parses a document so that <noscript> is treated as an opaque element.
+    *
+    * DOMParser runs with "scripting = off", which means <noscript> contents are
+    * parsed as normal DOM instead of being treated as raw/opaque text. This function
+    * reconstructs the document structure so that:
+    *
+    *  • Elements that are valid inside <head> stay in <head>
+    *  • Elements that belong in <body> are moved there
+    *  • <noscript> is preserved in the same structural position the browser
+    *    would have used when scripting is ON
+    *
+    * The parser tokenization behavior is still relied upon — we simply correct
+    * structural placement afterwards.
     */
 
     let allowedHead = new Set([
@@ -1209,8 +1389,8 @@ class uDarkC extends uDarkExtended {
       aDocument = parsedDocument;
     }
     else { /*We could do all the stuff the backend does to be sure to perfectly parse
-       the document prologue intact <!doctype> and </closing> tags but aside iframe srcdoc frontEditHTML overrides only some innerHTML or inserAdjacentHTML
-        that would have no benefits in having the intact prologue. */
+      the document prologue intact <!doctype> and </closing> tags but aside iframe srcdoc frontEditHTML overrides only some innerHTML or inserAdjacentHTML
+      that would have no benefits in having the intact prologue. */
 
       // Cant use \b because of the possibility of a - next to the identifier, it's a word character
       str = str.protect_simple(uDark.tagsToProtectRegex, "$1ud-tag-ptd-$2"); // But for noscripts il will become mandatory some day
@@ -1571,8 +1751,12 @@ class uDarkC extends uDarkExtended {
     });
   }
 
-  edit_str(strO, cssStyleSheet, verifyIntegrity = false, details, options = {}) {
 
+
+  edit_str(strO, cssStyleSheet, verifyIntegrity = false, details, options = {}) {
+    if (!options || typeof options !== "object") {
+      options = {};
+    }
     if (!(typeof strO === "string" || strO instanceof String)) {
       return strO; // Do not edit non string values to avoid errors, web is wide and wild
     }
@@ -1590,7 +1774,11 @@ class uDarkC extends uDarkExtended {
 
     str = import_protection.str;
     str = str.protect_simple(uDark.shortHandRegex, "--ud-ptd-$1:");
-
+    if (uDark.userSettings.preserve_comments) {
+      const commentAnchors = new uDark.CSSCommentAnchors(str);
+      str = commentAnchors.cleanCss;
+      options.commentAnchors = commentAnchors;
+    }
     if (!cssStyleSheet) {
       cssStyleSheet = new CSSStyleSheet()
       if (!options.nochunk) { // Avoiding a warning in the console when we know we are not chunking
@@ -1680,12 +1868,18 @@ class uDarkC extends uDarkExtended {
             return new Error("Rejected integrity rule as a whole");
           }
         }
+        cssStyleSheet.deleteRule(cssStyleSheet.cssRules.length - 1);
       }
 
       uDark.edit_css(cssStyleSheet, details, options);
 
-      let rules = [...cssStyleSheet.cssRules].map(r => r.cssText);
-      str = rules.join("\n");
+      let rules = [...cssStyleSheet.cssRules];
+
+      if (uDark.userSettings.preserve_comments && options.commentAnchors) {
+        rules = options.commentAnchors.mergeWithCssRules(rules);
+      }
+
+      str = rules.map(r => r.cssText).join("\n");
 
     }
     str = str.unprotect_simple("--ud-ptd-").unprotect_numbered(import_protection, uDark.exactAtRuleProtect)
