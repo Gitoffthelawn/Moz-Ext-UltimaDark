@@ -82,7 +82,7 @@ class uDarkExtended extends uDarkExtendedContentScript {
 
     }
 
-    if (data) { str += uDarkDecode(details.charset, data, { stream: true },details); }
+    if (data) { str += uDarkDecode(details.charset, data, { stream: true }, details); }
 
 
     let options = {};
@@ -573,7 +573,7 @@ class uDarkExtended extends uDarkExtendedContentScript {
     this.logPrefix = "UD";
     fetch("manifest.json").then(x => x.text()).then(x => JSON.parse(x.replace(/\s+\/\/.+/g, ""))).then(x => {
       uDark.production = x.browser_specific_settings.gecko.id;
-
+      uDark.production = uDark.production && uDark.production != "{0a0f6dea-3957-4bb9-9eec-2ef2b9e5bcec}"
       if (uDark.production) {
         uDark.success("Production mode", uDark.production);
         [console.log, console.warn, console.table, console.info] = Array(20).fill(z => { })
@@ -783,63 +783,165 @@ class uDarkExtended extends uDarkExtendedContentScript {
   }
   headersDo = {
     "link"(x) {
-      x.value = x.value.replace("integrity=", "data-no-integrity="); // Remove integrity attribute from link headers, as it can block udark css injection
+      // Remove the integrity attribute from Link headers, as it can block
+      // UltimaDark CSS injection.
+      x.value = x.value.replace(
+        "integrity=",
+        "data-no-integrity="
+      );
+
       return true;
     },
-    "content-security-policy-report-only": (x,details) => { return false },
-    "content-security-policy": (x,details) => {
-      let csp = x.value.toLowerCase();
-      if(uDark.browserInfo.Mozilla_Firefox >= 148) {
-        x.value = x.value.replaceAll("require-trusted-types-for ", v => {
-          return "no-require-trusted-types-for"; // Since FF 148, we have a new directive "require-trusted-types-for" that can block our CSP bypass, we set it to 'none' to disable it
-        })
+
+    "content-security-policy-report-only": (x, details) => {
+      return false;
+    },
+
+    "content-security-policy": (x, details, stop = 0) => {
+
+      /*
+       * Since Firefox 148, `require-trusted-types-for 'script'` also protects
+       * DOMParser.parseFromString().
+       *
+       * Keep the site's Trusted Types enforcement and existing policy allowlist,
+       * but allow UltimaDark to create its DOMParser policy.
+       *
+       * This also covers empty directives, `'none'`, ASCII whitespace,
+       * line breaks, different casing and concatenated CSP headers.
+       */
+      if (uDark.browserInfo.Mozilla_Firefox >= 148) {
+        x.value = x.value.replace(
+          /(^|[;,])([ \t\n\f\r]*)trusted-types(?=[ \t\n\f\r;,]|$)/gi,
+          "$1$2trusted-types ultimadark#domparser"
+        );
       }
+
+      // uDark.log(
+      //   "CSP",
+      //   x.value,
+      //   details.hasHashCSP,
+      //   uDark.byPassCSPNonce
+      // );
+
+      /*
+       * Since Firefox 128, UltimaDark can inject code into the appropriate
+       * world, so a full CSP bypass is no longer required.
+       */
       if (uDark.browserInfo.Mozilla_Firefox >= 128) {
-        x.value = x.value.replaceAll("data:", v => {
-          return "https://data-image/ data:"; // Allow replacement of data: for udark data images
-        })
-        
-        x.value = x.value.replaceAll(/(['"]sha[0-9]{1,3}-)/gi,(v,g1)=>{
-          details.hasHashCSP = true;
-          return `'nonce-${uDark.byPassCSPNonce}' `+ g1; // Allow replacement of sha hashes for udark css, as they can be used to block our css injection, we replace them with a nonce that we will add to our injected css rules, this way we can bypass the hash check and still have some level of security against other css injections
-        })
-        return true; // Since FF 128, we have world_injection_available, so no need to bypass CSP unless for udark data-images
-      }
-      
+        x.value = x.value.replaceAll(
+          "data:",
+          "https://data-image/ data:"
+        );
 
-      let cspArray = csp.split(/;|,/g).map(x => x.trim()).filter(x => x);
-      /* Quoted values are very defined and never contain a comma or a semicolon. No protection needed
-      Urls in CSP break on these characters, browser expects them to be url encoded, so we can't have them in the value
-      */
-      let cspObject = {};
+        x.value = x.value.replaceAll(
+          /(['"]sha[0-9]{1,3}-)/gi,
+          (match, hashPrefix) => {
+            details.hasHashCSP = true;
 
-      cspArray.forEach(element => {
-        element = element + " ";
-        let spIndex = element.indexOf(" ");
-        let key = element.slice(0, spIndex);
-        let value = " ";
-        value = element.slice(spIndex + 1);
-        // uDark.log("CSP", key, value,spIndex);
-        cspObject[key] = value.trim();
-      });
-      let CSPBypass_map = {
-        // "* 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:": ["default-src"],
-        "delete": new Set(["default-src", "report-uri", "report-to", "require-trusted-types-for", "img-src", "script-src", "script-src-attr", "style-src-attr", "script-src-elem", "style-src"]),
+            /*
+             * Add UltimaDark's nonce before the original hash source.
+             * The original hash is preserved.
+             */
+            return `'nonce-${uDark.byPassCSPNonce}' ${hashPrefix}`;
+          }
+        );
+
+        return true;
       }
-      for (let [newCSPValue, cspDirectiveKeys] of Object.entries(CSPBypass_map)) {
-        for (let cspDirective of cspDirectiveKeys) {
-          if (cspDirective in cspObject) { // Care to use in ; as default-src can be empty, which is equivalent to 'none' 
+
+      /*
+       * Legacy CSP bypass for Firefox versions below 128.
+       *
+       * Quoted CSP values cannot contain literal commas or semicolons.
+       * URLs containing these characters must encode them, so no additional
+       * protection is needed before splitting.
+       */
+      const cspArray = x.value
+        .toLowerCase()
+        .split(/[;,]/g)
+        .map(directive => directive.trim())
+        .filter(Boolean);
+
+      const cspObject = {};
+
+      for (const directive of cspArray) {
+        /*
+         * CSP recognizes the following ASCII whitespace characters:
+         * space, tab, LF, FF and CR.
+         */
+        const separatorIndex = directive.search(/[ \t\n\f\r]/);
+
+        if (separatorIndex === -1) {
+          /*
+           * A directive may have no value. For source-list directives,
+           * an empty value is equivalent to `'none'`.
+           */
+          cspObject[directive] = "";
+          continue;
+        }
+
+        const key = directive.slice(0, separatorIndex);
+        const value = directive
+          .slice(separatorIndex)
+          .trim();
+
+        cspObject[key] = value;
+      }
+
+      const CSPBypass_map = {
+        /*
+         * Example for replacing directives instead of deleting them:
+         *
+         * "* 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:":
+         *   ["default-src"],
+         */
+        delete: new Set([
+          "default-src",
+          "report-uri",
+          "report-to",
+          "require-trusted-types-for",
+          "img-src",
+          "script-src",
+          "script-src-attr",
+          "style-src-attr",
+          "script-src-elem",
+          "style-src",
+        ]),
+      };
+
+      for (
+        const [newCSPValue, cspDirectiveKeys]
+        of Object.entries(CSPBypass_map)
+      ) {
+        for (const cspDirective of cspDirectiveKeys) {
+          if (newCSPValue === "delete") {
+            delete cspObject[cspDirective];
+            continue;
+          }
+
+          /*
+           * Use `in` rather than a truthiness check because a directive may
+           * exist with an empty value.
+           */
+          if (cspDirective in cspObject) {
             cspObject[cspDirective] = newCSPValue;
           }
-          if (newCSPValue === "delete")
-            delete cspObject[cspDirective];
         }
       }
-      let newCSP = Object.entries(cspObject).map(([key, value]) => {
-        return `${key} ${value}`;
-      }).join("; ");
-      x.value = newCSP;
-      return true; // Return true to apply the change, false to remove the header. We must keep the header since a website can send x frame options, among CSP, and removing it would give priority to the x frame options
+
+      x.value = Object.entries(cspObject)
+        .map(([key, value]) => {
+          return value
+            ? `${key} ${value}`
+            : key;
+        })
+        .join("; ");
+
+      /*
+       * Keep the CSP header. Removing it entirely could make an accompanying
+       * X-Frame-Options header take priority.
+       */
+      return true;
     },
   }
   registeredCS = []

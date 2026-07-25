@@ -851,8 +851,9 @@ class uDarkC extends uDarkExtended {
               return "%25" + match.slice(1);  // Would still break on a str like %RE%RE ( two invalid percent encodings in a row)
             }
           });
-        }
+        };
         imageData = uDark.frontEditHTML(false, imageData, details, options);
+
         let encoded = undefined;
         // uDark.disable_reencode_data_svg_to_base64=true;
         if (uDark.disable_reencode_data_svg_to_base64) {
@@ -1143,15 +1144,17 @@ class uDarkC extends uDarkExtended {
     return false; // No workaround applied
   }
   transformADocumentBackend(aDocument, parsedDocument, details) {
+
     aDocument.querySelectorAll("meta[http-equiv=content-security-policy]").forEach(meta => {
       let item = { value: meta.getAttribute("content") };
       if (item.value && item.value.trim().length) {
-        uDark.headersDo["content-security-policy"](item, details);
+        uDark.headersDo["content-security-policy"](item, details, 1);
         meta.setAttribute("content", item.value);
       }
 
     }
     );
+
     if (!details.debugParsing) {
 
       // 4. Temporarily replace all SVG elements to avoid accidental style modifications
@@ -1394,7 +1397,9 @@ class uDarkC extends uDarkExtended {
 
       // Cant use \b because of the possibility of a - next to the identifier, it's a word character
       str = str.protect_simple(uDark.tagsToProtectRegex, "$1ud-tag-ptd-$2"); // But for noscripts il will become mandatory some day
+
       parsedDocument = uDark.createDocumentFromHtml("<html><head>" + str); // Encapsulate in a full HTML document to be able to parse fragments properly
+
       options.ptd_head = parsedDocument.getElementsByTagName("ud-tag-ptd-head")[0];
       if (options.ptd_head) { // Allows to keep a head with all its forbidden tags and also to know its a full HTML document that was submited
         parsedDocument.head.p_ud_innerHTML = parsedDocument.head.p_ud_innerHTML + options.ptd_head.innerHTML;
@@ -1402,7 +1407,6 @@ class uDarkC extends uDarkExtended {
       }
       aDocument = parsedDocument;
     }
-
     // 4. Temporarily replace all SVG elements to avoid accidental style modifications
     const svgElements = uDark.processSvgElements(aDocument, details);
 
@@ -1445,11 +1449,17 @@ class uDarkC extends uDarkExtended {
     let will_return = resultEdited.unprotect_simple("ud-tag-ptd-");
     return will_return;
   }
-
   createDocumentFromHtml(html, type = "text/html") {
-    // Use DOMParser to convert the HTML string into a DOM document
     const parser = new uDark.DOMParser();
-    return parser.p_ud_parseFromString(html, type);
+
+    // Convert extension-generated strings to TrustedHTML before passing them
+    // to a Trusted Types-protected DOM sink, when a policy is available.
+    return parser.p_ud_parseFromString(
+      uDark.domParserPolicy
+        ? uDark.domParserPolicy.createHTML(html)
+        : html,
+      type
+    );
   }
 
   processSvgElements(documentElement, details) {
@@ -2504,8 +2514,10 @@ class uDarkC extends uDarkExtended {
       alSeenCSSImageUrls = new Set();
       details.transientCache.set("CSSImageUrls", alSeenCSSImageUrls);
     }
+
     let valuesToEncapsulate = new Set();
     value = value.replace(used_regex, (match, g1, g2, g3, g4) => {
+
       if (match.includes(uDark.imageSrcInfoMarker)) {
         return match;
       }
@@ -2521,11 +2533,13 @@ class uDarkC extends uDarkExtended {
         let usedQuote = link1.length > 2 && [`'`, `"`].includes(link1[0]) ? link1[0] : "";
         let link = usedQuote ? link1.slice(1, -1) : link1;
         options.changed = true;
+
         let notableInfos = {
           "uDark_cssClass": encodeURI(cssRule.selectorText),
           "uDark_backgroundRepeat": cssStyle.backgroundRepeat || vars.originalBackgroundRepeat, // Curently broken, we need to fix it
           "css-guess": toggle
         };
+
 
         let hasFontRelatedItem = ["font", "font-family", "font-size", "color"].some(x => cssRule.style.getPropertyValue(x));
         if (hasFontRelatedItem) {

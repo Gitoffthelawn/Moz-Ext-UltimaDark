@@ -1034,7 +1034,8 @@ document.addEventListener("alpine:init", () => {
                 manifest = JSON.parse(manifest.replace(/\s+\/\/.+/g, ""));
                 this.version = manifest.version;
 
-                const production = manifest.browser_specific_settings?.gecko?.id;
+                let production = manifest.browser_specific_settings?.gecko?.id;
+                production = production && production != "{0a0f6dea-3957-4bb9-9eec-2ef2b9e5bcec}"
                 this.productionMode = production ? "Production mode" : "Development mode";
             } catch (error) {
                 console.error('Failed to load version info:', error);

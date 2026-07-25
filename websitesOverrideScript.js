@@ -98,6 +98,29 @@ class WebsitesOverrideScript {
 
 
         uDark.info("Websites overrides install", window);
+
+        {
+            // Create a dedicated passthrough Trusted Types policy for UltimaDark.
+            // It allows extension-generated markup to be passed to Trusted Types-protected
+            // DOM sinks while preserving the page's Trusted Types enforcement.
+            uDark.domParserPolicy = null;
+
+            if (globalThis.trustedTypes) {
+                try {
+                    uDark.domParserPolicy = globalThis.trustedTypes.createPolicy(
+                        "ultimadark#dom-parser",
+                        {
+                            createHTML: value => value
+                        }
+                    );
+                } catch (error) {
+                    console.warn(
+                        "[UltimaDark] Unable to create Trusted Types policy:",
+                        error
+                    );
+                }
+            }
+        }
         // uDark.functionPrototypeEditor(HTMLObjectElement, HTMLObjectElement.prototype.checkValidity, (elem, args) => {
         //   return args;
         // })
@@ -147,22 +170,21 @@ class WebsitesOverrideScript {
             args[1] = uDark.frontEditHTML("ANY_ELEMENT", args[1]); // frontEditHTML have a diffferent behavior with STYLE elements
             return args;
         })
-        uDark.valuePrototypeEditor(HTMLElement,"nonce", (elem, value) => {
-            return uDark.byPassCSPNonce; 
+        uDark.valuePrototypeEditor(HTMLElement, "nonce", (elem, value) => {
+            return uDark.byPassCSPNonce;
         }, (elem, value) => {
             return elem instanceof HTMLStyleElement;
         });
-        
+
         uDark.functionPrototypeEditor(Element, Element.prototype.setAttribute, (elem, args) => {
-           
-            if(elem instanceof HTMLLinkElement && args[0].toLowerCase() === "integrity")
-            {
-               elem.origIntegrity = args[1];
-               args[0] = new Error("CancelledCall");
-               args[0].altArgs = ["data-no-integrity", args[1]];
-               return args;
+
+            if (elem instanceof HTMLLinkElement && args[0].toLowerCase() === "integrity") {
+                elem.origIntegrity = args[1];
+                args[0] = new Error("CancelledCall");
+                args[0].altArgs = ["data-no-integrity", args[1]];
+                return args;
             }
-            
+
             // if(elem instanceof HTMLStyleElement && args[0].toLowerCase() === "nonce")
             // { // useless : if site is defining a nonce, it has it as CSP
             //     args[1] = uDark.byPassCSPNonce; // To bypass CSP that can block our css when we edit style elements textContent, we set a nonce that we will add to our injected css rules, this way we can bypass the hash check and still have some level of security against other css injections
@@ -174,7 +196,7 @@ class WebsitesOverrideScript {
             args[1] = res;
             return args;
         }, (attribute, value) =>
-             ["style","integrity"].includes (attribute.toLowerCase())   )
+            ["style", "integrity"].includes(attribute.toLowerCase()))
 
         uDark.valuePrototypeEditor(HTMLImageElement, "src", (image, value) => {
             if (!(value instanceof String || typeof value === "string")) {
@@ -308,6 +330,7 @@ class WebsitesOverrideScript {
                 return elem.origIntegrity;
             }
         )
+
 
         uDark.functionWrapper(SVGSVGElement, SVGSVGElement.prototype.setAttribute, "setAttribute", function (elem, args) {
             elem.addEventListener("js_svg_loaded", z => uDark.frontEditSVG(elem));
@@ -658,7 +681,7 @@ class WebsitesOverrideScript {
             }
             return uDark.edit_str(value)
 
-        }, (elem, value) => elem instanceof HTMLStyleElement || elem instanceof SVGStyleElement )
+        }, (elem, value) => elem instanceof HTMLStyleElement || elem instanceof SVGStyleElement)
 
 
         uDark.valuePrototypeEditor(CSS2Properties, "fill", (elem, value) => {
@@ -704,6 +727,7 @@ class WebsitesOverrideScript {
 
 
         }
+
 
         uDark.valuePrototypeEditor(CSS2Properties, "background", bg_websiteEditFn)
 
