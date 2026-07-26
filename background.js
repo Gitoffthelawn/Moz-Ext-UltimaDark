@@ -1660,6 +1660,7 @@ class uDarkC extends uDarkExtended {
   }
 
   injectStylesIfNeeded(aDocument, details) {
+
     // Inject custom CSS and the dark color scheme meta tag if this is the first data load
     if (details.dataCount === 1) {
 
@@ -1668,11 +1669,12 @@ class uDarkC extends uDarkExtended {
       const udMetaDark = aDocument.querySelector("meta[name='color-scheme']") || document.createElement("meta");
       udMetaDark.id = "ud-meta-dark";
       udMetaDark.name = "color-scheme";
-      udMetaDark.content = "dark";
-
+      udMetaDark.content = "dark";ZZ
       // Note : looking for a head first is not a problem since aDocument, in the last iteration of parsing is a body.
-      let headElem = aDocument.head;
-      headElem.prepend(udMetaDark);
+      if (!udMetaDark.isConnected) {
+        let headElem = aDocument.head;
+        headElem.prepend(udMetaDark);
+      }
     }
   }
   markUnclosedForms(parsedDocument) {

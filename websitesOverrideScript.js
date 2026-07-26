@@ -672,17 +672,26 @@ class WebsitesOverrideScript {
             testStyle.outerHTML += testStyle.outerHTML + testStyle.outerHTML.slice(0, -8) + ".test20 {color:red!important}" + "</style>"
         }
         /****************************************** */
-    
+
         // FINALLY CNN Use this one (webpack)!!!!
         uDark.valuePrototypeEditor(Node, "textContent", (elem, value) => {
-            if(!elem.nonce)
-            {
+            if (!elem.nonce) {
                 elem.o_ud_setAttribute("nonce", uDark.byPassCSPNonce); // To bypass CSP that can block our css when we edit style elements textContent, we set a nonce that we will add to our injected css rules, this way we can bypass the hash check and still have some level of security against other css injections
             }
             return uDark.edit_str(value)
 
-        }, (elem, value) => elem instanceof HTMLStyleElement || elem instanceof SVGStyleElement)
+        }, (elem, value) => elem instanceof HTMLStyleElement || elem instanceof SVGStyleElement);
 
+        uDark.valuePrototypeEditor(HTMLMetaElement, "content", (elem, value) => {
+            return "dark"
+        }, (elem, value) => elem.id == "ud-meta-dark");
+
+
+        uDark.functionWrapper(HTMLMetaElement, HTMLMetaElement.prototype.setAttribute, "setAttribute", function (elem, args) {
+            args[1] = "dark";
+            return [elem, args]
+        },
+            (elem, args) => elem.id = "ud-meta-dark" && args[0] == "content")
 
         uDark.valuePrototypeEditor(CSS2Properties, "fill", (elem, value) => {
             if (!console.warn("Fill not reimplented", elem, value)) { return value };
