@@ -51,13 +51,8 @@ jobs:
     steps:
       # Checkout the repository
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@main
 
-      # Install the latest Node.js version
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 'lts/*'  # Automatically fetches the latest LTS version
 
       # Read the version from manifest.json
       - name: Read version from manifest.json
@@ -79,7 +74,12 @@ jobs:
           fi
           git tag "v${{ env.VERSION }}"
           git push origin "v${{ env.VERSION }}"
-
+          
+      - name: Set release extension ID
+        run: |
+          sed -i \
+            's/{0a0f6dea-3957-4bb9-9eec-2ef2b9e5bcec}/{7c7f6dea-3957-4bb9-9eec-2ef2b9e5bcec}/g' \
+            manifest.json
       # Create a zip of selected files (from the FILES_TO_PACKAGE environment variable)
       - name: Create zip of selected files
         run: |
@@ -95,7 +95,7 @@ jobs:
       # Create a release on GitHub
       - name: Create GitHub Release
         id: create_release
-        uses: comnoco/create-release-action@v2.0.5
+        uses: comnoco/create-release-action@main
         with:
           tag_name: v${{ env.VERSION }}
           release_name: v${{ env.VERSION }}
@@ -109,7 +109,7 @@ jobs:
       
       # Upload zip file to the release
       - name: Upload assets to release
-        uses: svenstaro/upload-release-action@v2
+        uses: svenstaro/upload-release-action@main
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: release/UltimaDark-v${{ env.VERSION }}.*
