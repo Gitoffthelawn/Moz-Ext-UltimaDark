@@ -121,10 +121,10 @@ class WebsitesOverrideScript {
                 }
             }
         }
+        
         // uDark.functionPrototypeEditor(HTMLObjectElement, HTMLObjectElement.prototype.checkValidity, (elem, args) => {
         //   return args;
         // })
-
 
         uDark.functionPrototypeEditor(CSSStyleDeclaration, CSSStyleDeclaration.prototype.setProperty, (elem, args) => {
             let edited = uDark.edit_str_nochunk(args[0] + ":" + args[1])
@@ -143,6 +143,8 @@ class WebsitesOverrideScript {
 
             return args
         });
+
+        
         uDark.functionPrototypeEditor(CSSStyleSheet,
             [
                 CSSStyleSheet.prototype.replace,
@@ -152,10 +154,11 @@ class WebsitesOverrideScript {
                 return args;
             })
 
+
         // This is the one youtube uses
         uDark.valuePrototypeEditor([Element, ShadowRoot], "innerHTML", uDark.frontEditHTML); // toString : some objects can redefine tostring to generate their inner
-        // uDark.valuePrototypeEditor([Element, ShadowRoot], "innerHTML", uDark.frontEditHTML, (elem,value)=>
 
+        // uDark.valuePrototypeEditor([Element, ShadowRoot], "innerHTML", uDark.frontEditHTML, (elem,value)=>
 
         { // Wrap JS editing iframe and this kind of objects SRC's
             uDark.valuePrototypeEditor([HTMLIFrameElement, HTMLEmbedElement], "src", uDark.frontEditHTMLPossibleDataURL);
@@ -250,6 +253,8 @@ class WebsitesOverrideScript {
         //     return res
         //   };
         // })();
+
+        
         uDark.valuePrototypeEditor([HTMLSourceElement, HTMLImageElement], "srcset", (image, value) => {
             console.log("Editing srcset", image, value);
             let srcSourceArray = uDark.processSRCset(value).map(
@@ -258,6 +263,7 @@ class WebsitesOverrideScript {
             return srcSourceArray.join(", ");
 
         },
+        
             // false, // Condition: Inconditional
             // //Aftermath: none
             // false,
@@ -276,6 +282,8 @@ class WebsitesOverrideScript {
             // }
 
         );
+
+        
 
         // function makeSmartElement(tag) {
         //   const el = document.createElement(tag);

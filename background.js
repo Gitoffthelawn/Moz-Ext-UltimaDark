@@ -1669,7 +1669,7 @@ class uDarkC extends uDarkExtended {
       const udMetaDark = aDocument.querySelector("meta[name='color-scheme']") || document.createElement("meta");
       udMetaDark.id = "ud-meta-dark";
       udMetaDark.name = "color-scheme";
-      udMetaDark.content = "dark";ZZ
+      udMetaDark.content = "dark";
       // Note : looking for a head first is not a problem since aDocument, in the last iteration of parsing is a body.
       if (!udMetaDark.isConnected) {
         let headElem = aDocument.head;
