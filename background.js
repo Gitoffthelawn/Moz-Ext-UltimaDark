@@ -1143,6 +1143,111 @@ class uDarkC extends uDarkExtended {
     }
     return false; // No workaround applied
   }
+  createInclusiveDOMQueryScope(root, excludedSubtrees = false) {
+    if (!root || typeof root.querySelectorAll !== "function") {
+      return false;
+    }
+
+    // Backend documents and parsed DocumentFragments keep their native query
+    // methods. Only an Element root needs an inclusive/filtered facade.
+    if (!excludedSubtrees && !(root instanceof Element)) {
+      return root;
+    }
+
+    const isExcluded = node => {
+      if (!excludedSubtrees) {
+        return false;
+      }
+
+      for (let current = node; current; current = current.parentNode) {
+        if (excludedSubtrees.has(current)) {
+          return true;
+        }
+        if (current === root) {
+          break;
+        }
+      }
+
+      return false;
+    };
+
+    const querySelectorAll = selector => {
+      const nodes = [];
+
+      if (
+        root instanceof Element &&
+        root.matches(selector) &&
+        !isExcluded(root)
+      ) {
+        nodes.push(root);
+      }
+
+      for (const node of root.querySelectorAll(selector)) {
+        if (!isExcluded(node)) {
+          nodes.push(node);
+        }
+      }
+
+      return nodes;
+    };
+
+    return {
+      querySelectorAll,
+      querySelector(selector) {
+        return querySelectorAll(selector)[0] || null;
+      }
+    };
+  }
+  transformDOMSubtree(root, details, options = {}) {
+    const {
+      excludedSubtrees = false,
+      deferSvgRestore = false,
+      deferIntegrityRestore = false,
+      fromDocumentWrite: _fromDocumentWrite = false,
+      ...editOptions
+    } = options;
+    const scope = uDark.createInclusiveDOMQueryScope(
+      root,
+      excludedSubtrees
+    );
+    const result = { svgElements: [] };
+
+    if (!scope) {
+      return result;
+    }
+
+    if (root instanceof SVGElement) {
+      uDark.frontEditSVG(root, details, editOptions);
+      return result;
+    }
+
+    let completed = false;
+    try {
+      result.svgElements = uDark.processSvgElements(scope, details);
+      uDark.edit_styles_attributes(scope, details, editOptions);
+      uDark.edit_styles_elements(
+        scope,
+        details,
+        "ud-edited-background",
+        editOptions
+      );
+      uDark.processLinks(scope);
+      uDark.processImages(scope);
+      uDark.processIframes(scope, details, editOptions);
+      uDark.processColoredItems(scope);
+      completed = true;
+      return result;
+    } finally {
+      // Deferred restoration is part of the successful backend pipeline only.
+      // Never leave temporary SVG placeholders behind after an exception.
+      if (!deferSvgRestore || !completed) {
+        uDark.restoreSvgElements(result.svgElements);
+      }
+      if (!deferIntegrityRestore) {
+        uDark.restoreIntegrityAttributes(scope);
+      }
+    }
+  }
   transformADocumentBackend(aDocument, parsedDocument, details) {
 
     aDocument.querySelectorAll("meta[http-equiv=content-security-policy]").forEach(meta => {
@@ -1157,29 +1262,20 @@ class uDarkC extends uDarkExtended {
 
     if (!details.debugParsing) {
 
-      // 4. Temporarily replace all SVG elements to avoid accidental style modifications
-      const svgElements = uDark.processSvgElements(aDocument, details);
-      // 5. Edit styles and attributes inline for background elements
-      uDark.edit_styles_attributes(aDocument, details);
-      uDark.edit_styles_elements(aDocument, details, "ud-edited-background");
-
-      // 8. Add a custom identifier to favicon links to manage cache
-      uDark.processLinks(aDocument);
-
-      // 9. Process image sources and prepare them for custom modifications
-      uDark.processImages(aDocument);
-
-      // 10. Recursively process iframes using the "srcdoc" attribute by applying the same editing logic
-      uDark.processIframes(aDocument, details, {});
-
-      // 11. Handle elements with color attributes (color, bgcolor) and ensure proper color handling
-      uDark.processColoredItems(aDocument);
+      const transformedSubtree = uDark.transformDOMSubtree(
+        aDocument,
+        details,
+        {
+          deferSvgRestore: true,
+          deferIntegrityRestore: true
+        }
+      );
 
       // 12. Inject custom CSS and dark color scheme if required (only for the first data load)
       uDark.injectStylesIfNeeded(parsedDocument, details); // Only benefit of this ; avoids page being white on uDark refresh
 
       // 13. Restore the original SVG elements that were temporarily replaced
-      uDark.restoreSvgElements(svgElements);
+      uDark.restoreSvgElements(transformedSubtree.svgElements);
 
       uDark.markUnclosedForms(parsedDocument);
 
@@ -1407,30 +1503,7 @@ class uDarkC extends uDarkExtended {
       }
       aDocument = parsedDocument;
     }
-    // 4. Temporarily replace all SVG elements to avoid accidental style modifications
-    const svgElements = uDark.processSvgElements(aDocument, details);
-
-    // 5. Edit styles and attributes inline for background elements
-    uDark.edit_styles_attributes(aDocument, details);
-    uDark.edit_styles_elements(aDocument, details, "ud-edited-background");
-
-    // 8. Add a custom identifier to favicon links to manage cache
-    uDark.processLinks(aDocument);
-
-    // 9. Process image sources and prepare them for custom modifications
-    uDark.processImages(aDocument);
-
-    // 10. Recursively process iframes using the "srcdoc" attribute by applying the same editing logic
-    uDark.processIframes(aDocument, details, options);
-
-    // 11. Handle elements with color attributes (color, bgcolor) and ensure proper color handling
-    uDark.processColoredItems(aDocument);
-
-    // 13. Restore the original SVG elements that were temporarily replaced
-    uDark.restoreSvgElements(svgElements);
-
-    // 15. Remove the integrity attribute from elements and replace it with a custom attribute
-    uDark.restoreIntegrityAttributes(aDocument);
+    uDark.transformDOMSubtree(aDocument, details, options);
 
     // 18. After all the edits, return the final HTML output
 

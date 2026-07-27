@@ -777,7 +777,212 @@ class WebsitesOverrideScript {
             return uDark.edit_str(value)
         }, (elem, value) => value && (elem instanceof HTMLStyleElement)); // No innerText for SVGStyleElement, it's an HTMLElement feature
 
+        WebsitesOverrideScript.installDocumentWriteEngine();
+
         console.info("UltimaDark", "Websites overrides ready", window, "elapsed:", performance.now() - start);
 
+    }
+
+    static installDocumentWriteEngine = function () {
+        if (uDark.documentWriteEngineInstalled) {
+            return;
+        }
+
+        uDark.documentWriteEngineInstalled = true;
+
+        const documentPrototype = Document.prototype;
+        const originalOpen = documentPrototype.open;
+        const originalWrite = documentPrototype.write;
+        const originalWriteln = documentPrototype.writeln;
+        const originalClose = documentPrototype.close;
+        const documentStates = new WeakMap();
+
+        const createState = doc => ({
+            editedSubtrees: new WeakSet(),
+            processing: false,
+            finalizer: false,
+            finalized: false,
+            active: false,
+            documentElement: doc.documentElement
+        });
+
+        const getState = doc => {
+            let state = documentStates.get(doc);
+            if (!state) {
+                state = createState(doc);
+                documentStates.set(doc, state);
+            }
+            return state;
+        };
+
+        const resetState = doc => {
+            const previousState = documentStates.get(doc);
+            if (previousState?.finalizer) {
+                doc.removeEventListener(
+                    "DOMContentLoaded",
+                    previousState.finalizer
+                );
+            }
+            const state = createState(doc);
+            documentStates.set(doc, state);
+            return state;
+        };
+
+        const synchronizeState = doc => {
+            const state = getState(doc);
+            if (state.documentElement !== doc.documentElement) {
+                return resetState(doc);
+            }
+            return state;
+        };
+
+        const editSubtree = (root, state) => {
+            if (!(root instanceof Element) || state.editedSubtrees.has(root)) {
+                return true;
+            }
+
+            try {
+                uDark.transformDOMSubtree(root, undefined, {
+                    fromDocumentWrite: true,
+                    excludedSubtrees: state.editedSubtrees
+                });
+                state.editedSubtrees.add(root);
+                return true;
+            } catch (error) {
+                uDark.error("document.write subtree edit failed", root, error);
+                return false;
+            }
+        };
+
+        const editStableBranches = (root, state) => {
+            let parent = root;
+
+            while (parent instanceof Element) {
+                // SVG contents are one editing unit handled by frontEditSVG().
+                // Never mark individual descendants before their SVG root.
+                if (parent instanceof SVGElement) {
+                    return;
+                }
+
+                const children = [...parent.children];
+                if (!children.length) {
+                    return;
+                }
+
+                for (let index = 0; index < children.length - 1; index++) {
+                    editSubtree(children[index], state);
+                }
+
+                parent = children[children.length - 1];
+            }
+        };
+
+        const processDocument = (doc, final = false) => {
+            const state = getState(doc);
+            if (!state.active || state.processing) {
+                return;
+            }
+
+            state.processing = true;
+            try {
+                if (final) {
+                    state.finalized = !doc.documentElement ||
+                        editSubtree(doc.documentElement, state);
+                    state.documentElement = doc.documentElement;
+                    return;
+                }
+
+                if (doc.documentElement) {
+                    editStableBranches(doc.documentElement, state);
+                }
+            } finally {
+                state.processing = false;
+            }
+        };
+
+        const attachFinalizer = doc => {
+            const state = synchronizeState(doc);
+            if (!state.active || state.finalizer || state.finalized) {
+                return;
+            }
+
+            if (doc.readyState !== "loading") {
+                state.finalizer = () => {
+                    state.finalizer = false;
+                    processDocument(doc, true);
+                };
+                queueMicrotask(state.finalizer);
+                return;
+            }
+
+            state.finalizer = () => {
+                state.finalizer = false;
+                processDocument(doc, true);
+            };
+            doc.addEventListener("DOMContentLoaded", state.finalizer, {
+                once: true
+            });
+        };
+
+        const installMethod = (name, original, handler) => {
+            const descriptor = Object.getOwnPropertyDescriptor(
+                documentPrototype,
+                name
+            );
+            const wrapper = new Proxy(original, {
+                apply(target, thisArg, args) {
+                    return handler(target, thisArg, args);
+                },
+                get(target, property, receiver) {
+                    if (property === "toString") {
+                        return Function.prototype.toString.bind(target);
+                    }
+                    return Reflect.get(target, property, receiver);
+                }
+            });
+
+            Object.defineProperty(documentPrototype, name, {
+                ...descriptor,
+                value: wrapper
+            });
+        };
+
+        installMethod("open", originalOpen, (original, doc, args) => {
+            const result = Reflect.apply(original, doc, args);
+
+            // The obsolete three-argument overload is an alias of
+            // window.open() and does not replace the current document.
+            if (args.length < 3) {
+                resetState(doc);
+            }
+
+            return result;
+        });
+
+        installMethod("write", originalWrite, (original, doc, args) => {
+            const result = Reflect.apply(original, doc, args);
+            const state = synchronizeState(doc);
+            state.active = true;
+            attachFinalizer(doc);
+            processDocument(doc);
+            return result;
+        });
+
+        installMethod("writeln", originalWriteln, (original, doc, args) => {
+            const result = Reflect.apply(original, doc, args);
+            const state = synchronizeState(doc);
+            state.active = true;
+            attachFinalizer(doc);
+            processDocument(doc);
+            return result;
+        });
+
+        installMethod("close", originalClose, (original, doc, args) => {
+            const result = Reflect.apply(original, doc, args);
+            synchronizeState(doc);
+            processDocument(doc, true);
+            return result;
+        });
+        uDark.log("document.write support installed");
     }
 }
