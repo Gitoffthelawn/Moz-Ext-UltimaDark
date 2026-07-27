@@ -1975,18 +1975,7 @@ class uDarkC extends uDarkExtended {
       }
     }
 
-    const markEdited = value => (
-      typeof value === "string" && !value.startsWith("/*edited*/")
-        ? "/*edited*/" + value
-        : value
-    );
-
-    if (str && typeof str === "object" && "str" in str) {
-      str.str = markEdited(str.str);
-      return str;
-    }
-
-    return markEdited(str || strO); // It's essential to return the original value if the CSS is broken, if e did not knew what to do with it, we should not have edited it. This is demostrated on hub.docker.com that looks into a comment only css
+    return str || strO; // It's essential to return the original value if the CSS is broken, if e did not knew what to do with it, we should not have edited it. This is demostrated on hub.docker.com that looks into a comment only css
   }
   rgba_val(r, g, b, a) {
     a = typeof a == "number" ? a : 1;

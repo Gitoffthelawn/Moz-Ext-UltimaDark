@@ -779,30 +779,6 @@ class WebsitesOverrideScript {
 
         WebsitesOverrideScript.installDocumentWriteEngine();
 
-        (() => {
-            const proto = HTMLHeadElement.prototype;
-            const originalAppendChild = proto.appendChild;
-
-            Object.defineProperty(proto, "appendChild", {
-                configurable: true,
-                writable: true,
-
-                value: function appendChild(child) {
-                    if (
-                        child instanceof HTMLStyleElement &&
-                        child.textContent &&
-                        !child.textContent.includes("/*edited*/")
-                    ) {
-                        child.o_ud_textContent = uDark.edit_str(
-                            child.textContent
-                        );
-                    }
-
-                    return originalAppendChild.call(this, child);
-                }
-            });
-        })();
-
         console.info("UltimaDark", "Websites overrides ready", window, "elapsed:", performance.now() - start);
 
     }
